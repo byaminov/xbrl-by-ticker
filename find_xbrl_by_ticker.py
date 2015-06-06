@@ -63,27 +63,63 @@ def find_xbrl_url_in_filing_by_url(url, ticker):
 		return None
 
 
-def get_xbrl_data(xbrl_url):
+def _find_element_value(xml, ns, name, year, xbrl_url):
+	elements = xml.findall('{%s}%s' % (ns['us-gaap'], name), ns)
+	if len(elements) == 0:
+		return None
+
+	value = {}
+	contexts = []
+
+	for e in elements:
+		value[e.get('contextRef')] = e.text
+		contexts.append((e.get('contextRef'), e.text))
+
+	# Leave only records for the last year: year of publication or the previous one
+	# print '1', contexts
+	filtered = filter(lambda c: year in c[0], contexts)
+	if len(filtered) == 0:
+		filtered = filter(lambda c: str(int(year) - 1) in c[0], contexts)
+	# print '2', filtered
+
+	# Always ignore records with '_us-gaap_' in name
+	filtered = filter(lambda c: '_us-gaap_' not in c[0], filtered)
+	if len(filtered) == 0:
+		return None
+	# print '3', filtered
+
+	# Then remove long records that are prolongation of the first short one,
+	# e.g. 'I2012Q4_us-gaap_StatementScenarioAxis...' following simple 'I2012Q4'
+	if (len(filtered) > 1):
+		filtered = sorted(filtered, lambda c1, c2: len(c1[0]) - len(c2[0]))
+		filtered = filter(lambda c: re.match('^%s.+$' % filtered[0][0], c[0], re.DOTALL) is None, filtered)
+		# print '4', filtered
+
+	if (len(filtered) > 1 or len(filtered) == 0):
+		raise Exception('Could not choose correct %s for %s in %s: %s' % (name, year, xbrl_url, filtered))
+
+	value['FINAL_contextRef'] = filtered[0][0]
+	value['FINAL'] = filtered[0][1]
+
+	return value
+
+
+def get_xbrl_data(xbrl_url, date):
 	xml_file = _download_url_to_file(xbrl_url)
 	xml, ns = _parse_xml_with_ns(xml_file)
 
 	# print 'processing %s' % xbrl_url
 
+	year = date[:4]
+
 	result = {}
-	def find_element(name):
-		for e in xml.findall('{%s}%s' % (ns['us-gaap'], name), ns):
-			if name not in result:
-				result[name] = {}
-			result[name][e.get('contextRef')] = e.text
 
-	find_element('OtherAssetsCurrent')
-	find_element('OtherAssetsNoncurrent')
-	find_element('OtherAssets')
-	find_element('OtherLiabilities')
-	find_element('OtherLiabilitiesCurrent')
-	find_element('OtherLiabilitiesNoncurrent')
-	find_element('Assets')
-
+	elements = ['OtherAssetsCurrent', 'OtherAssetsNoncurrent', 'OtherAssets', 
+		'OtherLiabilities', 'OtherLiabilitiesCurrent', 'OtherLiabilitiesNoncurrent', 'Assets']
+	for name in elements:
+		value = _find_element_value(xml, ns, name, year, xbrl_url)
+		if value is not None:
+			result[name] = value
 	return result
 
 
@@ -91,9 +127,9 @@ def find_xbrls(ticker):
 	filings = find_filings_with_xbrl_ref(ticker)
 	result = {}
 	for f in filings:
-		# print '[%s] %s' % (f['date'], f['url'])
+		print '[%s] %s' % (f['date'], f['url'])
 		xbrl_url = find_xbrl_url_in_filing_by_url(f['url'], ticker)
-		xbrl_data = get_xbrl_data(xbrl_url)
+		xbrl_data = get_xbrl_data(xbrl_url, f['date'])
 
 		result[f['date']] = xbrl_data
 
@@ -101,10 +137,11 @@ def find_xbrls(ticker):
 
 if __name__ == '__main__':
 	tickers = [
-		# 'KO',
-		# 'DELL',
-		# 'MSFT',
-		'GOOG'
+		'KO',
+		'DELL',
+		'MSFT',
+		'GOOG',
+		'MMM'
 	]
 
 	import pprint
