@@ -1,4 +1,4 @@
-import urllib2, re, os, urllib, csv
+import urllib2, re, os, urllib, csv, sys
 import xml.etree.ElementTree as ET
 
 CACHES_DIR = '%s/download-cache' % os.path.dirname(os.path.abspath(__file__))
@@ -129,7 +129,7 @@ def find_xbrls(company_xml):
 	filings = find_filings_with_xbrl_ref(company_xml)
 	xbrls = []
 	for f in filings:
-		print 'processing %s as of %s' % (ticker, f['date'])
+		print 'processing 10-K of %s published on %s' % (ticker, f['date'])
 		xbrl_url = find_xbrl_url_in_filing_by_url(f['url'], ticker)
 		xbrl_data = get_xbrl_data(xbrl_url)
 		xbrls.append(xbrl_data)
@@ -137,14 +137,20 @@ def find_xbrls(company_xml):
 	return xbrls
 
 if __name__ == '__main__':
-	tickers = [
-		'KO',
-		'DELL',
-		'MSFT',
-		'GOOG',
-		'MMM'
-	]
-	output_csv = 'company_results_over_years.txt'
+	if len(sys.argv) < 2:
+		print 'Usage: python find_xbrl_by_ticker.py <file with tickers (one per line)> [<output CSV filename>]'
+		sys.exit(0)
+
+	with open(sys.argv[1], 'r') as f:
+		tickers = map(lambda t: t.replace('\n', ''), f.readlines())
+
+	if len(sys.argv) > 2:
+		output_csv = sys.argv[2]
+	else:
+		output_csv = 'company_results_over_years.txt'
+
+	print 'Fetching XBRLs into file %s for %s companies: %s...' % (output_csv, len(tickers), 
+		str(tickers[0:3]).replace('[', '').replace(']', ''))
 
 	with open(output_csv, 'wb') as csvfile:
 		writer = csv.writer(csvfile, dialect='excel')
@@ -165,5 +171,4 @@ if __name__ == '__main__':
 					row.append(xbrl.get(element))
 				writer.writerow(row)
 
-	with open(output_csv, 'r') as f:
-		print f.read()
+	print 'Summary of XBRL reports is ready in CSV file %s' % output_csv
