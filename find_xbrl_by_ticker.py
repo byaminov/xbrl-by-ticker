@@ -51,6 +51,8 @@ def _parse_xml_with_ns(xml_file):
 def find_company_xml(ticker):
 	filings_url = 'http://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=%s&count=100&type=10-k&output=xml' % ticker
 	filings_xml = _download_url(filings_url)
+	if 'No matching Ticker Symbol' in filings_xml:
+		return None
 	return ET.fromstring(filings_xml)
 	
 
@@ -67,11 +69,12 @@ def find_filings_with_xbrl_ref(company_xml):
 
 def find_xbrl_url_in_filing_by_url(url, ticker):
 	filing = _download_url(url)
-	pattern = '/Archives/edgar/data/\w+/\w+/%s-\d+\.xml' % ticker.lower()
+	pattern = '/Archives/edgar/data/\w+/\w+/[a-z]+-\d+\.xml'
 	m = re.search(pattern, filing, re.DOTALL | re.UNICODE)
 	if m:
 		return 'http://www.sec.gov%s' % m.group(0)
 	else:
+		print 'Could not find XBRL XML URL by pattern [%s] in %s (company %s)' % (pattern, url, ticker)
 		return None
 
 
@@ -89,7 +92,7 @@ def _find_element_value(xml, ns, name, year, xbrl_url):
 	filtered = filter(lambda c: year in c[0], contexts)
 
 	# Always ignore records with '_us-gaap_' in name
-	filtered = filter(lambda c: '_us-gaap_' not in c[0], filtered)
+	filtered = filter(lambda c: '_us-gaap' not in c[0], filtered)
 	if len(filtered) == 0:
 		return None
 
@@ -114,6 +117,12 @@ def get_xbrl_data(xbrl_url):
 
 	# print 'processing %s' % xbrl_url
 
+	period_focus_element = xml.find('{%s}DocumentFiscalPeriodFocus' % ns['dei'], ns)
+	period_focus = period_focus_element.text if period_focus_element is not None else None
+	if period_focus is not None and period_focus != 'FY':
+		# print 'ignoring report not focusing on full year: %s (%s)' % (period_focus, xbrl_url)
+		return None
+
 	period_end_date = xml.find('{%s}DocumentPeriodEndDate' % ns['dei'], ns).text
 	year = period_end_date[:4]
 
@@ -132,7 +141,8 @@ def find_xbrls(company_xml):
 		print 'processing 10-K of %s published on %s' % (ticker, f['date'])
 		xbrl_url = find_xbrl_url_in_filing_by_url(f['url'], ticker)
 		xbrl_data = get_xbrl_data(xbrl_url)
-		xbrls.append(xbrl_data)
+		if xbrl_data is not None:
+			xbrls.append(xbrl_data)
 
 	return xbrls
 
@@ -142,7 +152,7 @@ if __name__ == '__main__':
 		sys.exit(0)
 
 	with open(sys.argv[1], 'r') as f:
-		tickers = map(lambda t: t.replace('\n', ''), f.readlines())
+		tickers = map(lambda t: t.replace('\n', '').replace('\r', ''), f.readlines())
 
 	if len(sys.argv) > 2:
 		output_csv = sys.argv[2]
@@ -159,6 +169,9 @@ if __name__ == '__main__':
 
 		for ticker in tickers:
 			company_xml = find_company_xml(ticker)
+			if company_xml is None:
+				print 'NO company found at http://www.sec.gov/ by ticker %s' % ticker
+				continue
 
 			cik = int(company_xml.find('./companyInfo/CIK').text)
 			company_name = company_xml.find('./companyInfo/name').text
