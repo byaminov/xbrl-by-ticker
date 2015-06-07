@@ -78,7 +78,7 @@ def find_xbrl_url_in_filing_by_url(url, ticker):
 		return None
 
 
-def _find_element_value(xml, ns, name, year, xbrl_url):
+def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 	elements = xml.findall('{%s}%s' % (ns['us-gaap'], name), ns)
 	if len(elements) == 0:
 		return None
@@ -89,6 +89,7 @@ def _find_element_value(xml, ns, name, year, xbrl_url):
 		contexts.append((e.get('contextRef'), e.text))
 
 	# Leave only records for the year of the period end date
+	year = period_end_date[:4]
 	filtered = filter(lambda c: year in c[0], contexts)
 
 	# Always ignore records with '_us-gaap_' in name
@@ -98,38 +99,42 @@ def _find_element_value(xml, ns, name, year, xbrl_url):
 
 	# Then remove long records that are prolongation of the first short one,
 	# e.g. 'I2012Q4_us-gaap_StatementScenarioAxis...' following simple 'I2012Q4'
-	if (len(filtered) > 1):
+	if len(filtered) > 1:
 		filtered = sorted(filtered, lambda c1, c2: len(c1[0]) - len(c2[0]))
 		filtered = filter(lambda c: re.match('^%s.+$' % filtered[0][0], c[0], re.DOTALL) is None, filtered)
 
-	if (len(filtered) > 1 or len(filtered) == 0):
-		raise Exception('Could not choose correct %s for %s in %s: %s' % (name, year, xbrl_url, filtered))
+	# Then try to filter exact date match, like 20130331. 
+	# This can happen if report is for full year, but company started later than 1 year ago.
+	if len(filtered) > 1:
+		filtered = filter(lambda c: period_end_date.replace('-', '') in c[0], filtered)
 
-	# print 'Chose context %s for %s in %s at %s' % (filtered[0][0], name, year, xbrl_url)
+	if (len(filtered) > 1 or len(filtered) == 0):
+		raise Exception('Could not choose correct %s for %s in %s : %s' % (name, year, xbrl_html_url, filtered))
+
+	# print 'Chose context %s for %s in %s at %s' % (filtered[0][0], name, year, xbrl_html_url)
 	value = filtered[0][1]
 
 	return value
 
 
-def get_xbrl_data(xbrl_url):
-	xml_file = _download_url_to_file(xbrl_url)
+def get_xbrl_data(xbrl_xml_url, xbrl_html_url):
+	xml_file = _download_url_to_file(xbrl_xml_url)
 	xml, ns = _parse_xml_with_ns(xml_file)
 
-	# print 'processing %s' % xbrl_url
+	# print 'processing %s' % xbrl_xml_url
 
 	period_focus_element = xml.find('{%s}DocumentFiscalPeriodFocus' % ns['dei'], ns)
 	period_focus = period_focus_element.text if period_focus_element is not None else None
 	if period_focus is not None and period_focus != 'FY':
-		# print 'ignoring report not focusing on full year: %s (%s)' % (period_focus, xbrl_url)
+		# print 'ignoring report not focusing on full year: %s (%s)' % (period_focus, xbrl_xml_url)
 		return None
 
 	period_end_date = xml.find('{%s}DocumentPeriodEndDate' % ns['dei'], ns).text
-	year = period_end_date[:4]
 
 	result = { 'DocumentPeriodEndDate': period_end_date }
 
 	for name in XBRL_ELEMENTS:
-		result[name] = _find_element_value(xml, ns, name, year, xbrl_url)
+		result[name] = _find_element_value(xml, ns, name, period_end_date, xbrl_html_url)
 
 	return result
 
@@ -140,7 +145,7 @@ def find_xbrls(company_xml):
 	for f in filings:
 		print 'processing 10-K of %s published on %s' % (ticker, f['date'])
 		xbrl_url = find_xbrl_url_in_filing_by_url(f['url'], ticker)
-		xbrl_data = get_xbrl_data(xbrl_url)
+		xbrl_data = get_xbrl_data(xbrl_url, f['url'])
 		if xbrl_data is not None:
 			xbrls.append(xbrl_data)
 
