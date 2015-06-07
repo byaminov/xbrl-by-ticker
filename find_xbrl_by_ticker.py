@@ -85,25 +85,19 @@ def _find_element_value(xml, ns, name, year, xbrl_url):
 	for e in elements:
 		contexts.append((e.get('contextRef'), e.text))
 
-	# Leave only records for the last year: year of publication or the previous one
-	# print '1', contexts
+	# Leave only records for the year of the period end date
 	filtered = filter(lambda c: year in c[0], contexts)
-	if len(filtered) == 0:
-		filtered = filter(lambda c: str(int(year) - 1) in c[0], contexts)
-	# print '2', filtered
 
 	# Always ignore records with '_us-gaap_' in name
 	filtered = filter(lambda c: '_us-gaap_' not in c[0], filtered)
 	if len(filtered) == 0:
 		return None
-	# print '3', filtered
 
 	# Then remove long records that are prolongation of the first short one,
 	# e.g. 'I2012Q4_us-gaap_StatementScenarioAxis...' following simple 'I2012Q4'
 	if (len(filtered) > 1):
 		filtered = sorted(filtered, lambda c1, c2: len(c1[0]) - len(c2[0]))
 		filtered = filter(lambda c: re.match('^%s.+$' % filtered[0][0], c[0], re.DOTALL) is None, filtered)
-		# print '4', filtered
 
 	if (len(filtered) > 1 or len(filtered) == 0):
 		raise Exception('Could not choose correct %s for %s in %s: %s' % (name, year, xbrl_url, filtered))
@@ -114,34 +108,33 @@ def _find_element_value(xml, ns, name, year, xbrl_url):
 	return value
 
 
-def get_xbrl_data(xbrl_url, date):
+def get_xbrl_data(xbrl_url):
 	xml_file = _download_url_to_file(xbrl_url)
 	xml, ns = _parse_xml_with_ns(xml_file)
 
 	# print 'processing %s' % xbrl_url
 
-	year = date[:4]
+	period_end_date = xml.find('{%s}DocumentPeriodEndDate' % ns['dei'], ns).text
+	year = period_end_date[:4]
 
-	result = {}
+	result = { 'DocumentPeriodEndDate': period_end_date }
 
 	for name in XBRL_ELEMENTS:
-		value = _find_element_value(xml, ns, name, year, xbrl_url)
-		if value is not None:
-			result[name] = value
+		result[name] = _find_element_value(xml, ns, name, year, xbrl_url)
+
 	return result
 
 
 def find_xbrls(company_xml):
 	filings = find_filings_with_xbrl_ref(company_xml)
-	result = {}
+	xbrls = []
 	for f in filings:
 		print 'processing %s as of %s' % (ticker, f['date'])
 		xbrl_url = find_xbrl_url_in_filing_by_url(f['url'], ticker)
-		xbrl_data = get_xbrl_data(xbrl_url, f['date'])
+		xbrl_data = get_xbrl_data(xbrl_url)
+		xbrls.append(xbrl_data)
 
-		result[f['date']] = xbrl_data
-
-	return result
+	return xbrls
 
 if __name__ == '__main__':
 	tickers = [
@@ -156,7 +149,7 @@ if __name__ == '__main__':
 	with open(output_csv, 'wb') as csvfile:
 		writer = csv.writer(csvfile, dialect='excel')
 
-		writer.writerow(['Ticker', 'CIK', 'Company name', 'Date'] + XBRL_ELEMENTS)
+		writer.writerow(['Ticker', 'CIK', 'Company name', 'DocumentPeriodEndDate'] + XBRL_ELEMENTS)
 
 		for ticker in tickers:
 			company_xml = find_company_xml(ticker)
@@ -166,9 +159,8 @@ if __name__ == '__main__':
 
 			xbrls = find_xbrls(company_xml)
 
-			for date in xbrls:
-				xbrl = xbrls[date]
-				row = [ticker, cik, company_name, date]
+			for xbrl in xbrls:
+				row = [ticker, cik, company_name, xbrl.get('DocumentPeriodEndDate')]
 				for element in XBRL_ELEMENTS:
 					row.append(xbrl.get(element))
 				writer.writerow(row)
