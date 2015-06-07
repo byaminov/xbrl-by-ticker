@@ -46,14 +46,17 @@ def _parse_xml_with_ns(xml_file):
 				root = elem
 	
 	return ET.ElementTree(root), dict(ns_map)
-	
 
-def find_filings_with_xbrl_ref(ticker):
+
+def find_company_xml(ticker):
 	filings_url = 'http://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=%s&count=100&type=10-k&output=xml' % ticker
 	filings_xml = _download_url(filings_url)
-	root = ET.fromstring(filings_xml)
+	return ET.fromstring(filings_xml)
+	
+
+def find_filings_with_xbrl_ref(company_xml):
 	results = []
-	for el in root.findall('./results/filing'):
+	for el in company_xml.findall('./results/filing'):
 		if el.find('XBRLREF') is not None:
 			results.append({
 				'date': el.find('dateFiled').text,
@@ -128,8 +131,8 @@ def get_xbrl_data(xbrl_url, date):
 	return result
 
 
-def find_xbrls(ticker):
-	filings = find_filings_with_xbrl_ref(ticker)
+def find_xbrls(company_xml):
+	filings = find_filings_with_xbrl_ref(company_xml)
 	result = {}
 	for f in filings:
 		print 'processing %s as of %s' % (ticker, f['date'])
@@ -153,17 +156,22 @@ if __name__ == '__main__':
 	with open(output_csv, 'wb') as csvfile:
 		writer = csv.writer(csvfile, dialect='excel')
 
-		writer.writerow(['Company', 'Date'] + XBRL_ELEMENTS)
+		writer.writerow(['Ticker', 'CIK', 'Company name', 'Date'] + XBRL_ELEMENTS)
 
 		for ticker in tickers:
-			xbrls = find_xbrls(ticker)
-			# import pprint
-			# pp = pprint.PrettyPrinter(indent = 4)
-			# pp.pprint(xbrls)
+			company_xml = find_company_xml(ticker)
+
+			cik = int(company_xml.find('./companyInfo/CIK').text)
+			company_name = company_xml.find('./companyInfo/name').text
+
+			xbrls = find_xbrls(company_xml)
+
 			for date in xbrls:
 				xbrl = xbrls[date]
-				row = [ticker, date]
+				row = [ticker, cik, company_name, date]
 				for element in XBRL_ELEMENTS:
 					row.append(xbrl.get(element))
 				writer.writerow(row)
 
+	with open(output_csv, 'r') as f:
+		print f.read()
