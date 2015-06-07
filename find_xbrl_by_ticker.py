@@ -1,7 +1,16 @@
-import urllib2, re, os, urllib
+import urllib2, re, os, urllib, csv
 import xml.etree.ElementTree as ET
 
 CACHES_DIR = '%s/download-cache' % os.path.dirname(os.path.abspath(__file__))
+XBRL_ELEMENTS = [
+	'OtherAssetsCurrent', 
+	'OtherAssetsNoncurrent', 
+	'OtherAssets', 
+	'OtherLiabilities', 
+	'OtherLiabilitiesCurrent', 
+	'OtherLiabilitiesNoncurrent', 
+	'Assets'
+]
 
 def _download_url_to_file(url):
 	cached_content = '%s/%s' % (CACHES_DIR, urllib.quote(url, ''))
@@ -68,11 +77,9 @@ def _find_element_value(xml, ns, name, year, xbrl_url):
 	if len(elements) == 0:
 		return None
 
-	value = {}
 	contexts = []
 
 	for e in elements:
-		value[e.get('contextRef')] = e.text
 		contexts.append((e.get('contextRef'), e.text))
 
 	# Leave only records for the last year: year of publication or the previous one
@@ -98,8 +105,8 @@ def _find_element_value(xml, ns, name, year, xbrl_url):
 	if (len(filtered) > 1 or len(filtered) == 0):
 		raise Exception('Could not choose correct %s for %s in %s: %s' % (name, year, xbrl_url, filtered))
 
-	value['FINAL_contextRef'] = filtered[0][0]
-	value['FINAL'] = filtered[0][1]
+	# print 'Chose context %s for %s in %s at %s' % (filtered[0][0], name, year, xbrl_url)
+	value = filtered[0][1]
 
 	return value
 
@@ -114,9 +121,7 @@ def get_xbrl_data(xbrl_url, date):
 
 	result = {}
 
-	elements = ['OtherAssetsCurrent', 'OtherAssetsNoncurrent', 'OtherAssets', 
-		'OtherLiabilities', 'OtherLiabilitiesCurrent', 'OtherLiabilitiesNoncurrent', 'Assets']
-	for name in elements:
+	for name in XBRL_ELEMENTS:
 		value = _find_element_value(xml, ns, name, year, xbrl_url)
 		if value is not None:
 			result[name] = value
@@ -127,7 +132,7 @@ def find_xbrls(ticker):
 	filings = find_filings_with_xbrl_ref(ticker)
 	result = {}
 	for f in filings:
-		print '[%s] %s' % (f['date'], f['url'])
+		print 'processing %s as of %s' % (ticker, f['date'])
 		xbrl_url = find_xbrl_url_in_filing_by_url(f['url'], ticker)
 		xbrl_data = get_xbrl_data(xbrl_url, f['date'])
 
@@ -143,10 +148,22 @@ if __name__ == '__main__':
 		'GOOG',
 		'MMM'
 	]
+	output_csv = 'company_results_over_years.txt'
 
-	import pprint
-	pp = pprint.PrettyPrinter(indent = 4)
+	with open(output_csv, 'wb') as csvfile:
+		writer = csv.writer(csvfile, dialect='excel')
 
-	for ticker in tickers:
-		xbrls = find_xbrls(ticker)
-		pp.pprint(xbrls)
+		writer.writerow(['Company', 'Date'] + XBRL_ELEMENTS)
+
+		for ticker in tickers:
+			xbrls = find_xbrls(ticker)
+			# import pprint
+			# pp = pprint.PrettyPrinter(indent = 4)
+			# pp.pprint(xbrls)
+			for date in xbrls:
+				xbrl = xbrls[date]
+				row = [ticker, date]
+				for element in XBRL_ELEMENTS:
+					row.append(xbrl.get(element))
+				writer.writerow(row)
+
