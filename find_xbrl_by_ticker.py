@@ -108,8 +108,14 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 	if len(filtered) > 1:
 		filtered = filter(lambda c: period_end_date.replace('-', '') in c[0], filtered)
 
-	if (len(filtered) > 1 or len(filtered) == 0):
-		raise Exception('Could not choose correct %s for %s in %s : %s' % (name, year, xbrl_html_url, filtered))
+	if len(filtered) > 1 or len(filtered) == 0:
+		message = 'Could not choose correct %s for %s in %s : %s. Original contexts: %s' % \
+			(name, year, xbrl_html_url, filtered, contexts)
+		if len(filtered) > 1:
+			raise Exception(message)
+		else:
+			print message
+			return None
 
 	# print 'Chose context %s for %s in %s at %s' % (filtered[0][0], name, year, xbrl_html_url)
 	value = filtered[0][1]
