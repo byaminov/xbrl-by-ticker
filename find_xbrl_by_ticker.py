@@ -1,5 +1,6 @@
-import urllib2, re, os, urllib, csv, sys
+import urllib2, re, os, urllib, csv, sys, time
 import xml.etree.ElementTree as ET
+
 
 CACHES_DIR = '%s/download-cache' % os.path.dirname(os.path.abspath(__file__))
 XBRL_ELEMENTS = [
@@ -12,19 +13,31 @@ XBRL_ELEMENTS = [
 	'Assets'
 ]
 
+
 def _download_url_to_file(url):
 	cached_content = '%s/%s' % (CACHES_DIR, urllib.quote(url, ''))
 	if os.path.exists(cached_content):
 		return cached_content
 	else:
 		print 'downloading %s' % url
-		response = urllib2.urlopen(url)
-		content = response.read()
-		if not os.path.exists(CACHES_DIR):
-			os.makedirs(CACHES_DIR)
-		with open(cached_content, 'w') as f:
-			f.write(content)
-		return cached_content
+
+		max_tries = 3
+		for try_count in range(max_tries + 1):
+			try:
+				response = urllib2.urlopen(url)
+				content = response.read()
+				if not os.path.exists(CACHES_DIR):
+					os.makedirs(CACHES_DIR)
+				with open(cached_content, 'w') as f:
+					f.write(content)
+				return cached_content
+			except Exception as e:
+				if try_count >= max_tries:
+					raise
+				else:
+					# Wait for a while
+					time.sleep(5)
+					print 'retrying %s after error: %s' % (url, e)
 
 
 def _download_url(url):
