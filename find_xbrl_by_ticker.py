@@ -103,40 +103,56 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 		contexts.append((e.get('contextRef'), e.text))
 
 	
-	# Always ignore records with '_us-gaap_' in name
-	filtered = filter(lambda c: '_us-gaap' not in c[0], contexts)
+	# Always ignore records with '_us-gaap' or '_dei' in name
+	filtered = filter(lambda c: '_us-gaap' not in c[0] and '_dei' not in c[0], contexts)
 	if len(filtered) == 0:
 		return None
 
 
-	# Filter only contexts related to the document end date.
 	# There are different date formats used in different XBRLs.
-	date_of_interest = datetime.strptime(period_end_date, '%Y-%m-%d')
+	end_date = datetime.strptime(period_end_date, '%Y-%m-%d')
 	expected_date_formats = [
 		'%Y%m%d',
+		'%Y-%m-%d',
 		'%m_%d_%Y',
 		'%-m_%d_%Y',
 		'%d%b%Y',
 		'%-d%b%Y',
+		'%b%d_%Y',
+		'%b%-d_%Y',
 		'%Y',
 	]
+
+	# Delete entries for one year ago - heuristic helping in cases when there is no entry for period end date
+	# date_year_ago = end_date.replace(year = end_date.year - 1)
+	try:
+		date_year_ago = datetime(end_date.year - 1, end_date.month, end_date.day, 0, 0)
+	except ValueError:
+		date_year_ago = datetime(end_date.year - 1, end_date.month, end_date.day - 1, 0, 0)
+	for format in expected_date_formats[:-1]:
+		filtered = filter(lambda c: date_year_ago.strftime(format) not in c[0], filtered)
+	if len(filtered) == 0:
+		print 'No value for %s for date %s in %s' % (name, period_end_date, contexts)
+		return None
+
+	# Filter only contexts related to the document end date.
 	for format in expected_date_formats:
-		date_string = date_of_interest.strftime(format)
+		date_string = end_date.strftime(format)
 		filtered_by_date = filter(lambda c: date_string in c[0], filtered)
 		if len(filtered_by_date) > 0:
 			used_date_format = date_string
 			break
-	if len(filtered_by_date) == 0:
-		# If length is the same, pick the last alphabetically, e.g. ['c00030', 'c00006'] -> 'c00030'
-		if len(filtered) > 1 and len(filter(lambda c: len(c[0]) != len(filtered[0][0]), filtered)) == 0:
-			print 'choosing %s from %s' % ([ sorted(filtered, key = lambda c: c[0], reverse = True)[0] ], filtered)
-			filtered = [ sorted(filtered, key = lambda c: c[0], reverse = True)[0] ]
-		else:
-			raise Exception(('Could not choose correct %s for %s in %s : it uses neither of ' +
-				'expected date formats. Original contexts: %s') % \
-				(name, period_end_date, xbrl_html_url, contexts))
-	else:
+	if len(filtered_by_date) != 0:
 		filtered = filtered_by_date
+	else:
+		# Some context do not contain dates but are of format 'c001', 'c002'.
+		# In this case select the last one.
+		if len(filtered) > 1 and all(map(lambda c: re.match('c\d+', c[0].lower()) is not None, filtered)):
+			sorted_by_number = sorted(filtered, key = lambda c: int(c[0].lower().replace('c', '')), reverse = True)
+			filtered =[ sorted_by_number[0] ]
+		else:
+			raise Exception(('Could not choose date format for %s for %s in %s . Original contexts: %s') % \
+				(name, period_end_date, xbrl_html_url, contexts))
 
 
 	# Then remove long records that are prolongation of the first short one,
