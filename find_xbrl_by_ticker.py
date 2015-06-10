@@ -83,7 +83,7 @@ def find_filings_with_xbrl_ref(company_xml):
 
 def find_xbrl_url_in_filing_by_url(url, ticker):
 	filing = _download_url(url)
-	pattern = '/Archives/edgar/data/\w+/\w+/[a-z]+-\d+\.xml'
+	pattern = '/Archives/edgar/data/\w+/\w+/[a-zA-Z0-9]+-\d+\.xml'
 	m = re.search(pattern, filing, re.DOTALL | re.UNICODE)
 	if m:
 		return 'http://www.sec.gov%s' % m.group(0)
@@ -111,7 +111,7 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 
 	# There are different date formats used in different XBRLs.
 	end_date = datetime.strptime(period_end_date, '%Y-%m-%d')
-	expected_date_formats = [
+	full_date_formats = [
 		'%Y%m%d',
 		'%Y-%m-%d',
 		'%m_%d_%Y',
@@ -120,7 +120,10 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 		'%-d%b%Y',
 		'%b%d_%Y',
 		'%b%-d_%Y',
+	]
+	expected_date_formats = full_date_formats + [
 		'%Y',
+		'E%y',
 	]
 
 	# Delete entries for one year ago - heuristic helping in cases when there is no entry for period end date
@@ -129,7 +132,7 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 		date_year_ago = datetime(end_date.year - 1, end_date.month, end_date.day, 0, 0)
 	except ValueError:
 		date_year_ago = datetime(end_date.year - 1, end_date.month, end_date.day - 1, 0, 0)
-	for format in expected_date_formats[:-1]:
+	for format in full_date_formats:
 		filtered = filter(lambda c: date_year_ago.strftime(format) not in c[0], filtered)
 	if len(filtered) == 0:
 		print 'No value for %s for date %s in %s' % (name, period_end_date, contexts)
@@ -150,6 +153,11 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 		if len(filtered) > 1 and all(map(lambda c: re.match('c\d+', c[0].lower()) is not None, filtered)):
 			sorted_by_number = sorted(filtered, key = lambda c: int(c[0].lower().replace('c', '')), reverse = True)
 			filtered =[ sorted_by_number[0] ]
+
+		# If period end is 2015, for some reason correct context is 'FI2014Q4' for many companies
+		elif len(filter(lambda c: 'I%sQ4' % (end_date.year - 1) in c[0], filtered)) > 0:
+			filtered = filter(lambda c: 'I%sQ4' % (end_date.year - 1) in c[0], filtered)
+
 		else:
 			raise Exception(('Could not choose date format for %s for %s in %s . Original contexts: %s') % \
 				(name, period_end_date, xbrl_html_url, contexts))
