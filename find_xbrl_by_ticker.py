@@ -124,12 +124,19 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 		date_string = date_of_interest.strftime(format)
 		filtered_by_date = filter(lambda c: date_string in c[0], filtered)
 		if len(filtered_by_date) > 0:
+			used_date_format = date_string
 			break
-	filtered = filtered_by_date
-	if len(filtered) == 0:
-		raise Exception(('Could not choose correct %s for %s in %s : it uses neither of ' +
-			'expected date formats. Original contexts: %s') % \
-			(name, period_end_date, xbrl_html_url, contexts))
+	if len(filtered_by_date) == 0:
+		# If length is the same, pick the last alphabetically, e.g. ['c00030', 'c00006'] -> 'c00030'
+		if len(filtered) > 1 and len(filter(lambda c: len(c[0]) != len(filtered[0][0]), filtered)) == 0:
+			print 'choosing %s from %s' % ([ sorted(filtered, key = lambda c: c[0], reverse = True)[0] ], filtered)
+			filtered = [ sorted(filtered, key = lambda c: c[0], reverse = True)[0] ]
+		else:
+			raise Exception(('Could not choose correct %s for %s in %s : it uses neither of ' +
+				'expected date formats. Original contexts: %s') % \
+				(name, period_end_date, xbrl_html_url, contexts))
+	else:
+		filtered = filtered_by_date
 
 
 	# Then remove long records that are prolongation of the first short one,
@@ -138,10 +145,11 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 		filtered = sorted(filtered, lambda c1, c2: len(c1[0]) - len(c2[0]))
 		filtered = filter(lambda c: re.match('^%s.+$' % filtered[0][0], c[0], re.DOTALL) is None, filtered)
 
-	# Or try to remove a very long description, which is 3 times longer than the short one
+	# Or try to remove those which are aaa20100610_BlaBlaBla
 	if len(filtered) > 1:
 		filtered = sorted(filtered, lambda c1, c2: len(c1[0]) - len(c2[0]))
-		filtered = filter(lambda c: len(c[0]) < 3 * len(filtered[0][0]), filtered)
+		filtered = filter(lambda c: re.match('^.{,10}%s.{15,}$' % used_date_format, c[0], re.DOTALL) is None, filtered)
+
 
 
 	if len(filtered) > 1 or len(filtered) == 0:
@@ -233,7 +241,7 @@ if __name__ == '__main__':
 					writer.writerow(row)
 
 			except Exception as e:
-				# raise
-				print 'Failed to process %s: %s' % (ticker, e)
+				raise
+				# print 'Failed to process %s: %s' % (ticker, e)
 
 	print 'Summary of XBRL reports is ready in CSV file %s' % output_csv
