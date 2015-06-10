@@ -118,8 +118,13 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 		'%-m_%d_%Y',
 		'%d%b%Y',
 		'%-d%b%Y',
+		'%d-%b-%Y',
+		'%-d-%b-%Y',
+		'%d_%b_%Y',
+		'%-d_%b_%Y',
 		'%b%d_%Y',
 		'%b%-d_%Y',
+		'YEARQUARTER'
 	]
 	expected_date_formats = full_date_formats + [
 		'%Y',
@@ -140,7 +145,10 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 
 	# Filter only contexts related to the document end date.
 	for format in expected_date_formats:
-		date_string = end_date.strftime(format)
+		if format != 'YEARQUARTER':
+			date_string = end_date.strftime(format)
+		else:
+			date_string = '%sQ%s' % (end_date.year, (end_date.month - 1) // 3 + 1)
 		filtered_by_date = filter(lambda c: date_string in c[0], filtered)
 		if len(filtered_by_date) > 0:
 			used_date_format = date_string
@@ -172,7 +180,7 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 	# Or try to remove those which are aaa20100610_BlaBlaBla
 	if len(filtered) > 1:
 		filtered = sorted(filtered, lambda c1, c2: len(c1[0]) - len(c2[0]))
-		filtered = filter(lambda c: re.match('^.{,10}%s.{15,}$' % used_date_format, c[0], re.DOTALL) is None, filtered)
+		filtered = filter(lambda c: re.match('^.{,10}%s.{10,}$' % used_date_format, c[0], re.DOTALL) is None, filtered)
 
 
 
@@ -265,7 +273,7 @@ if __name__ == '__main__':
 					writer.writerow(row)
 
 			except Exception as e:
-				raise
-				# print 'Failed to process %s: %s' % (ticker, e)
+				# raise
+				print 'Failed to process %s: %s' % (ticker, e)
 
 	print 'Summary of XBRL reports is ready in CSV file %s' % output_csv
