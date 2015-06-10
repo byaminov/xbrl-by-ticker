@@ -1,5 +1,6 @@
 import urllib2, re, os, urllib, csv, sys, time
 import xml.etree.ElementTree as ET
+from datetime import datetime
 
 
 CACHES_DIR = '%s/download-cache' % os.path.dirname(os.path.abspath(__file__))
@@ -19,7 +20,7 @@ def _download_url_to_file(url):
 	if os.path.exists(cached_content):
 		return cached_content
 	else:
-		print 'downloading %s' % url
+		print 'downloading %s (%s)' % (url, datetime.now().time())
 
 		max_tries = 3
 		for try_count in range(max_tries + 1):
@@ -101,14 +102,35 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 	for e in elements:
 		contexts.append((e.get('contextRef'), e.text))
 
-	# Leave only records for the year of the period end date
-	year = period_end_date[:4]
-	filtered = filter(lambda c: year in c[0], contexts)
-
+	
 	# Always ignore records with '_us-gaap_' in name
-	filtered = filter(lambda c: '_us-gaap' not in c[0], filtered)
+	filtered = filter(lambda c: '_us-gaap' not in c[0], contexts)
 	if len(filtered) == 0:
 		return None
+
+
+	# Filter only contexts related to the document end date.
+	# There are different date formats used in different XBRLs.
+	date_of_interest = datetime.strptime(period_end_date, '%Y-%m-%d')
+	expected_date_formats = [
+		'%Y%m%d',
+		'%m_%d_%Y',
+		'%-m_%d_%Y',
+		'%d%b%Y',
+		'%-d%b%Y',
+		'%Y',
+	]
+	for format in expected_date_formats:
+		date_string = date_of_interest.strftime(format)
+		filtered_by_date = filter(lambda c: date_string in c[0], filtered)
+		if len(filtered_by_date) > 0:
+			break
+	filtered = filtered_by_date
+	if len(filtered) == 0:
+		raise Exception(('Could not choose correct %s for %s in %s : it uses neither of ' +
+			'expected date formats. Original contexts: %s') % \
+			(name, period_end_date, xbrl_html_url, contexts))
+
 
 	# Then remove long records that are prolongation of the first short one,
 	# e.g. 'I2012Q4_us-gaap_StatementScenarioAxis...' following simple 'I2012Q4'
@@ -116,21 +138,22 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 		filtered = sorted(filtered, lambda c1, c2: len(c1[0]) - len(c2[0]))
 		filtered = filter(lambda c: re.match('^%s.+$' % filtered[0][0], c[0], re.DOTALL) is None, filtered)
 
-	# Then try to filter exact date match, like 20130331. 
-	# This can happen if report is for full year, but company started later than 1 year ago.
+	# Or try to remove a very long description, which is 3 times longer than the short one
 	if len(filtered) > 1:
-		filtered = filter(lambda c: period_end_date.replace('-', '') in c[0], filtered)
+		filtered = sorted(filtered, lambda c1, c2: len(c1[0]) - len(c2[0]))
+		filtered = filter(lambda c: len(c[0]) < 3 * len(filtered[0][0]), filtered)
+
 
 	if len(filtered) > 1 or len(filtered) == 0:
 		message = 'Could not choose correct %s for %s in %s : %s. Original contexts: %s' % \
-			(name, year, xbrl_html_url, filtered, contexts)
+			(name, period_end_date, xbrl_html_url, filtered, contexts)
 		if len(filtered) > 1:
 			raise Exception(message)
 		else:
 			print message
 			return None
 
-	# print 'Chose context %s for %s in %s at %s' % (filtered[0][0], name, year, xbrl_html_url)
+	# print 'Chose context %s for %s in %s at %s' % (filtered[0][0], name, period_end_date, xbrl_html_url)
 	value = filtered[0][1]
 
 	return value
@@ -192,20 +215,25 @@ if __name__ == '__main__':
 		writer.writerow(['Ticker', 'CIK', 'Company name', 'DocumentPeriodEndDate'] + XBRL_ELEMENTS)
 
 		for ticker in tickers:
-			company_xml = find_company_xml(ticker)
-			if company_xml is None:
-				print 'NO company found at http://www.sec.gov/ by ticker %s' % ticker
-				continue
+			try:
+				company_xml = find_company_xml(ticker)
+				if company_xml is None:
+					print 'NO company found at http://www.sec.gov/ by ticker %s' % ticker
+					continue
 
-			cik = int(company_xml.find('./companyInfo/CIK').text)
-			company_name = company_xml.find('./companyInfo/name').text
+				cik = int(company_xml.find('./companyInfo/CIK').text)
+				company_name = company_xml.find('./companyInfo/name').text
 
-			xbrls = find_xbrls(company_xml)
+				xbrls = find_xbrls(company_xml)
 
-			for xbrl in xbrls:
-				row = [ticker, cik, company_name, xbrl.get('DocumentPeriodEndDate')]
-				for element in XBRL_ELEMENTS:
-					row.append(xbrl.get(element))
-				writer.writerow(row)
+				for xbrl in xbrls:
+					row = [ticker, cik, company_name, xbrl.get('DocumentPeriodEndDate')]
+					for element in XBRL_ELEMENTS:
+						row.append(xbrl.get(element))
+					writer.writerow(row)
+
+			except Exception as e:
+				# raise
+				print 'Failed to process %s: %s' % (ticker, e)
 
 	print 'Summary of XBRL reports is ready in CSV file %s' % output_csv
