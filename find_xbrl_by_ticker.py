@@ -162,7 +162,7 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 			sorted_by_number = sorted(filtered, key = lambda c: int(c[0].lower().replace('c', '')), reverse = True)
 			filtered =[ sorted_by_number[0] ]
 
-		# If period end is 2015, for some reason correct context is 'FI2014Q4' for many companies
+		# If period end is e.g. 2015, for some reason correct context is 'FI2014Q4' for many companies
 		elif len(filter(lambda c: 'I%sQ4' % (end_date.year - 1) in c[0], filtered)) > 0:
 			filtered = filter(lambda c: 'I%sQ4' % (end_date.year - 1) in c[0], filtered)
 
@@ -199,7 +199,7 @@ def _find_element_value(xml, ns, name, period_end_date, xbrl_html_url):
 	return value
 
 
-def get_xbrl_data(xbrl_xml_url, xbrl_html_url):
+def get_xbrl_data(xbrl_xml_url, xbrl_html_url, xbrl_publication_date):
 	xml_file = _download_url_to_file(xbrl_xml_url)
 	xml, ns = _parse_xml_with_ns(xml_file)
 
@@ -213,7 +213,10 @@ def get_xbrl_data(xbrl_xml_url, xbrl_html_url):
 
 	period_end_date = xml.find('{%s}DocumentPeriodEndDate' % ns['dei'], ns).text
 
-	result = { 'DocumentPeriodEndDate': period_end_date }
+	result = { 
+		'DocumentPeriodEndDate': period_end_date,
+		'DateFiled': xbrl_publication_date
+	}
 
 	for name in XBRL_ELEMENTS:
 		result[name] = _find_element_value(xml, ns, name, period_end_date, xbrl_html_url)
@@ -227,7 +230,7 @@ def find_xbrls(company_xml):
 	for f in filings:
 		print 'processing 10-K of %s published on %s' % (ticker, f['date'])
 		xbrl_url = find_xbrl_url_in_filing_by_url(f['url'], ticker)
-		xbrl_data = get_xbrl_data(xbrl_url, f['url'])
+		xbrl_data = get_xbrl_data(xbrl_url, f['url'], f['date'])
 		if xbrl_data is not None:
 			xbrls.append(xbrl_data)
 
@@ -252,7 +255,7 @@ if __name__ == '__main__':
 	with open(output_csv, 'wb') as csvfile:
 		writer = csv.writer(csvfile, dialect='excel')
 
-		writer.writerow(['Ticker', 'CIK', 'Company name', 'DocumentPeriodEndDate'] + XBRL_ELEMENTS)
+		writer.writerow(['Ticker', 'CIK', 'CompanyName', 'DocumentPeriodEndDate', 'DateFiled'] + XBRL_ELEMENTS)
 
 		for ticker in tickers:
 			try:
@@ -267,7 +270,7 @@ if __name__ == '__main__':
 				xbrls = find_xbrls(company_xml)
 
 				for xbrl in xbrls:
-					row = [ticker, cik, company_name, xbrl.get('DocumentPeriodEndDate')]
+					row = [ticker, cik, company_name, xbrl.get('DocumentPeriodEndDate'), xbrl.get('DateFiled')]
 					for element in XBRL_ELEMENTS:
 						row.append(xbrl.get(element))
 					writer.writerow(row)
