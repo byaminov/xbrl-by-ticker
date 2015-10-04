@@ -2,3 +2,4 @@ download-cache/
 *.csv
 *.txt
 *.xls*
+*.zip
